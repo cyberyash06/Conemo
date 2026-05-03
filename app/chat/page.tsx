@@ -1,0 +1,777 @@
+'use client';
+
+import { useEffect, useState, useRef, Suspense } from 'react';
+import { useSearchParams, useRouter } from 'next/navigation';
+import { io, Socket } from 'socket.io-client';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Send, User as UserIcon, LogOut, Loader2, Flag, SkipForward, AlertTriangle, Smile, Reply, X } from 'lucide-react';
+import { useTheme } from 'next-themes';
+import EmojiPicker, { Theme } from 'emoji-picker-react';
+import { ThemeToggle } from '../ThemeToggle';
+
+interface Message {
+  _id: string;
+  senderId: string;
+  text: string;
+  timestamp: string;
+  replyTo?: {
+    messageId: string;
+    text: string;
+    senderId: string;
+  };
+}
+
+interface Partner {
+  userId: string;
+  username: string;
+}
+
+const moodsConfig = {
+  happy: 'rgba(250, 204, 21, 0.2)',
+  sad: 'rgba(96, 165, 250, 0.2)',
+  energetic: 'rgba(251, 146, 60, 0.2)',
+  bored: 'rgba(192, 132, 252, 0.2)',
+  lonely: 'rgba(129, 140, 248, 0.2)'
+};
+
+const AnimatedEmoji = ({ char, sizeClass }: { char: string, sizeClass: string }) => {
+  const isLaughing = ['😂', '🤣', '😆', '🤭', '😜'].includes(char);
+  const isCrying = ['😭', '😢', '🥺', '😞'].includes(char);
+  const isAngry = ['😡', '🤬', '🤯'].includes(char);
+  const isLove = ['🥰', '😍', '❤️'].includes(char);
+
+  let animateProps = {};
+  let transitionProps = {};
+
+  if (isLaughing) {
+    animateProps = { y: [0, -10, 0], rotateZ: [-10, 10, -10, 0] };
+    transitionProps = { duration: 0.5, repeat: Infinity, repeatType: "mirror" };
+  } else if (isCrying) {
+    animateProps = { y: [0, 4, 0], scale: [1, 0.95, 1] };
+    transitionProps = { duration: 1.2, repeat: Infinity };
+  } else if (isAngry) {
+    animateProps = { x: [-3, 3, -3, 0] };
+    transitionProps = { duration: 0.15, repeat: Infinity };
+  } else if (isLove) {
+    animateProps = { scale: [1, 1.15, 1] };
+    transitionProps = { duration: 0.8, repeat: Infinity };
+  } else {
+    animateProps = { y: [0, -3, 0] };
+    transitionProps = { duration: 2, repeat: Infinity, ease: "easeInOut" };
+  }
+
+  const renderTears = () => (
+    <>
+      <motion.div animate={{ y: [10, 60], opacity: [1, 0], scaleX: [1, 0.5] }} transition={{ duration: 0.8, repeat: Infinity, ease: "easeIn" }} className="absolute top-[40%] left-[20%] w-[3px] h-[30px] bg-gradient-to-b from-blue-300 to-blue-500 rounded-full blur-[1px] z-0"></motion.div>
+      <motion.div animate={{ y: [10, 70], opacity: [1, 0], scaleX: [1, 0.5] }} transition={{ duration: 0.9, repeat: Infinity, delay: 0.4, ease: "easeIn" }} className="absolute top-[40%] right-[20%] w-[4px] h-[40px] bg-gradient-to-b from-cyan-300 to-blue-500 rounded-full blur-[1px] z-0"></motion.div>
+      <motion.div animate={{ y: [10, 40], opacity: [1, 0] }} transition={{ duration: 0.6, repeat: Infinity, delay: 0.2 }} className="absolute top-[50%] left-[50%] w-[2px] h-[15px] bg-blue-400 rounded-full blur-[1px] z-0"></motion.div>
+    </>
+  );
+
+  const renderLaughTears = () => (
+    <>
+      <motion.div animate={{ x: [0, -30], y: [0, -20], opacity: [1, 0], scale: [1, 0] }} transition={{ duration: 0.6, repeat: Infinity, delay: 0.1 }} className="absolute top-[30%] left-[10%] w-3 h-3 bg-cyan-300 rounded-full shadow-[0_0_10px_rgba(34,211,238,0.8)] z-0"></motion.div>
+      <motion.div animate={{ x: [0, 30], y: [0, -20], opacity: [1, 0], scale: [1, 0] }} transition={{ duration: 0.6, repeat: Infinity, delay: 0.4 }} className="absolute top-[30%] right-[10%] w-3 h-3 bg-cyan-300 rounded-full shadow-[0_0_10px_rgba(34,211,238,0.8)] z-0"></motion.div>
+    </>
+  );
+
+  const renderAngerSteam = () => (
+    <>
+      <motion.div animate={{ y: [0, -40], opacity: [0.8, 0], scale: [1, 2] }} transition={{ duration: 1, repeat: Infinity }} className="absolute -top-2 left-[20%] w-5 h-5 bg-red-500 rounded-full blur-md mix-blend-screen z-0"></motion.div>
+      <motion.div animate={{ y: [0, -50], opacity: [0.8, 0], scale: [1, 2.5] }} transition={{ duration: 1.2, repeat: Infinity, delay: 0.4 }} className="absolute -top-1 right-[20%] w-6 h-6 bg-orange-500 rounded-full blur-md mix-blend-screen z-0"></motion.div>
+    </>
+  );
+
+  const renderHearts = () => (
+    <>
+      <motion.div animate={{ y: [0, -50], x: [0, -15, 0], opacity: [1, 0] }} transition={{ duration: 1.5, repeat: Infinity }} className="absolute -top-4 left-0 text-red-500 text-3xl drop-shadow-[0_0_8px_rgba(239,68,68,0.8)] z-0">❤</motion.div>
+      <motion.div animate={{ y: [0, -60], x: [0, 25, 10], opacity: [1, 0] }} transition={{ duration: 1.8, repeat: Infinity, delay: 0.5 }} className="absolute -top-2 right-0 text-pink-400 text-2xl drop-shadow-[0_0_8px_rgba(244,114,182,0.8)] z-0">💖</motion.div>
+    </>
+  );
+
+  return (
+    <div className={`relative inline-flex items-center justify-center mx-2 ${sizeClass}`}>
+      {isCrying && renderTears()}
+      {isLaughing && renderLaughTears()}
+      {isAngry && renderAngerSteam()}
+      {isLove && renderHearts()}
+      
+      <motion.span
+        className="relative z-10"
+        animate={animateProps}
+        transition={transitionProps}
+        style={{ filter: 'drop-shadow(2px 8px 6px rgba(0,0,0,0.5)) contrast(1.15)', transformOrigin: 'center center' }}
+      >
+        {char}
+      </motion.span>
+    </div>
+  );
+};
+
+const MessageContent = ({ text }: { text: string }) => {
+  const noSpace = text.replace(/[\s\n]/g, '');
+  const emojiRegex = new RegExp("^(\\p{Emoji_Presentation}|\\p{Extended_Pictographic}|\\uFE0F|\\u200D)+$", "gu");
+  const isOnlyEmoji = noSpace.length > 0 && emojiRegex.test(noSpace);
+
+  if (isOnlyEmoji) {
+    const emojis = Array.from(noSpace);
+    const count = emojis.length;
+    let sizeClass = 'text-3xl'; // default for >5
+    if (count === 1) sizeClass = 'text-[5rem] leading-none';
+    else if (count === 2) sizeClass = 'text-6xl';
+    else if (count === 3) sizeClass = 'text-5xl';
+    else if (count <= 5) sizeClass = 'text-4xl';
+
+    return (
+      <div className="flex flex-wrap justify-center py-2 px-1">
+        {emojis.map((emoji, idx) => (
+          <AnimatedEmoji key={idx} char={emoji} sizeClass={sizeClass} />
+        ))}
+      </div>
+    );
+  }
+
+  return <p className="text-sm leading-relaxed">{text}</p>;
+};
+
+function ChatContent() {
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const { resolvedTheme } = useTheme();
+  const mood = searchParams.get('mood');
+  
+  const [socket, setSocket] = useState<Socket | null>(null);
+  const [isSearching, setIsSearching] = useState(true);
+  const [partner, setPartner] = useState<Partner | null>(null);
+  const [chatId, setChatId] = useState<string | null>(null);
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [inputText, setInputText] = useState('');
+  const [userId, setUserId] = useState<string | null>(null);
+  const [isTyping, setIsTyping] = useState(false);
+  const [partnerIsTyping, setPartnerIsTyping] = useState(false);
+  const [partnerDisconnected, setPartnerDisconnected] = useState(false);
+  const [partnerSkipped, setPartnerSkipped] = useState(false);
+  const [showReportModal, setShowReportModal] = useState(false);
+  const [reportReason, setReportReason] = useState('');
+  const [isReporting, setIsReporting] = useState(false);
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const [replyingTo, setReplyingTo] = useState<Message | null>(null);
+  const [searchTimedOut, setSearchTimedOut] = useState(false);
+
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const emojiPickerRef = useRef<HTMLDivElement>(null);
+  const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const disconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  useEffect(() => {
+    if (isSearching) {
+      setSearchTimedOut(false);
+      searchTimeoutRef.current = setTimeout(() => {
+        setSearchTimedOut(true);
+      }, 30000); // 30 seconds limit before warning
+    } else {
+      if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
+    }
+    return () => {
+      if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
+    };
+  }, [isSearching]);
+
+  useEffect(() => {
+    // Click outside handler for emoji picker
+    const handleClickOutside = (event: MouseEvent) => {
+      if (emojiPickerRef.current && !emojiPickerRef.current.contains(event.target as Node)) {
+        setShowEmojiPicker(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, []);
+
+  useEffect(() => {
+    // Initialize socket
+    const newSocket = io();
+    setSocket(newSocket);
+
+    // Fetch user info from session
+    const fetchUser = async () => {
+      try {
+        const response = await fetch('/api/auth/current');
+        const data = await response.json();
+        
+        if (data.success) {
+          setUserId(data.data.userId);
+          
+          // Emit join_queue only after we have user info
+          newSocket.emit('join_queue', {
+            userId: data.data.userId,
+            username: data.data.username,
+            mood: mood || 'happy'
+          });
+        } else {
+          router.push('/');
+        }
+      } catch (err) {
+        console.error('Error fetching user:', err);
+        router.push('/');
+      }
+    };
+
+    newSocket.on('connect', () => {
+      console.log('Connected to server');
+      fetchUser();
+    });
+
+    newSocket.on('active_chat_restored', ({ chatId, partner, messages }: { chatId: string; partner: Partner, messages: Message[] }) => {
+      if (disconnectTimeoutRef.current) clearTimeout(disconnectTimeoutRef.current);
+      setChatId(chatId);
+      setPartner(partner);
+      setMessages(messages);
+      setIsSearching(false);
+      setPartnerDisconnected(false);
+      setPartnerSkipped(false);
+    });
+
+    newSocket.on('match_found', ({ chatId, partner }: { chatId: string; partner: Partner }) => {
+      if (disconnectTimeoutRef.current) clearTimeout(disconnectTimeoutRef.current);
+      setChatId(chatId);
+      setPartner(partner);
+      setIsSearching(false);
+    });
+
+    newSocket.on('new_message', (message: Message) => {
+      setMessages((prev) => [...prev, message]);
+      setPartnerIsTyping(false); // Stop typing indicator when message arrives
+    });
+
+    newSocket.on('partner_typing', ({ isTyping }: { isTyping: boolean }) => {
+      setPartnerIsTyping(isTyping);
+    });
+
+    newSocket.on('partner_temporarily_disconnected', () => {
+      if (disconnectTimeoutRef.current) clearTimeout(disconnectTimeoutRef.current);
+      disconnectTimeoutRef.current = setTimeout(() => {
+        setPartnerDisconnected(true);
+      }, 10000); // 10 seconds buffer
+    });
+
+    newSocket.on('partner_reconnected', () => {
+      if (disconnectTimeoutRef.current) clearTimeout(disconnectTimeoutRef.current);
+      setPartnerDisconnected(false);
+    });
+
+    newSocket.on('partner_disconnected', () => {
+      if (disconnectTimeoutRef.current) clearTimeout(disconnectTimeoutRef.current);
+      setPartnerDisconnected(true);
+    });
+
+    newSocket.on('partner_skipped', () => {
+      if (disconnectTimeoutRef.current) clearTimeout(disconnectTimeoutRef.current);
+      setPartnerSkipped(true);
+      setPartnerDisconnected(true);
+    });
+
+    newSocket.on('rate_limit_error', ({ message }: { message: string }) => {
+      alert(message);
+      setIsTyping(false);
+    });
+
+    return () => {
+      newSocket.disconnect();
+    };
+  }, [mood, router]);
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
+
+  const handleSendMessage = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!inputText.trim() || !chatId || !socket) return;
+
+    socket.emit('send_message', {
+      chatId,
+      senderId: userId,
+      text: inputText,
+      ...(replyingTo ? { replyTo: { messageId: replyingTo._id, text: replyingTo.text, senderId: replyingTo.senderId } } : {})
+    });
+
+    setInputText('');
+    setReplyingTo(null);
+    handleTyping(false);
+  };
+
+  const handleTyping = (typing: boolean) => {
+    if (!socket || !chatId) return;
+    
+    if (typing !== isTyping) {
+      setIsTyping(typing);
+      socket.emit('typing', { chatId, isTyping: typing });
+    }
+
+    if (typing) {
+      if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+      typingTimeoutRef.current = setTimeout(() => {
+        handleTyping(false);
+      }, 3000);
+    }
+  };
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setInputText(e.target.value);
+    handleTyping(true);
+  };
+
+  const onEmojiClick = (emojiObject: { emoji: string }) => {
+    setInputText(prev => prev + emojiObject.emoji);
+    handleTyping(true);
+  };
+
+  const handleLeave = () => {
+    if (socket && chatId) {
+      socket.emit('leave_chat', { chatId });
+    }
+    router.push('/');
+  };
+
+  const handleRestartSearch = () => {
+    if (!socket) return;
+    setIsSearching(true);
+    setSearchTimedOut(false);
+    socket.emit('join_queue', {
+      userId,
+      username: 'temp',
+      mood: mood || 'happy'
+    });
+  };
+
+  const handleSkip = () => {
+    if (!socket || !chatId) return;
+    socket.emit('skip_chat', { chatId });
+    
+    // Reset state and find new match
+    setIsSearching(true);
+    setPartner(null);
+    setChatId(null);
+    setMessages([]);
+    setPartnerDisconnected(false);
+    setPartnerSkipped(false);
+    
+    // Re-join queue
+    socket.emit('join_queue', {
+      userId,
+      username: 'temp', // This will be handled by the server as we already have session
+      mood: mood || 'happy'
+    });
+  };
+
+  const handleReport = async () => {
+    if (!socket || !chatId || !partner || !reportReason.trim()) return;
+    
+    setIsReporting(true);
+    socket.emit('report_user', {
+      chatId,
+      reportedUserId: partner.userId,
+      reporterId: userId,
+      reason: reportReason
+    });
+    
+    // After report, suggest skipping or leaving
+    setIsReporting(false);
+    setShowReportModal(false);
+    setReportReason('');
+    alert('User reported. Thank you for keeping the community safe.');
+  };
+
+  const isImageUrl = (url: string) => {
+    return url.match(/\.(jpeg|jpg|gif|png|webp)$/) != null || url.startsWith('https://images.unsplash.com/');
+  };
+
+  const auraGlow = mood && moodsConfig[mood as keyof typeof moodsConfig] ? moodsConfig[mood as keyof typeof moodsConfig] : 'rgba(99, 102, 241, 0.1)';
+
+  return (
+    <div className="bg-slate-50 dark:bg-[#020617] min-h-screen text-slate-900 dark:text-slate-100 flex flex-col relative overflow-hidden selection:bg-indigo-500/30 transition-colors duration-500">
+      <div className="fixed inset-0 pointer-events-none z-0">
+        <motion.div animate={{ backgroundColor: auraGlow }} transition={{ duration: 1.5, ease: "easeInOut" }} className="absolute inset-0 opacity-40 dark:opacity-20 mix-blend-multiply dark:mix-blend-screen" />
+        <motion.div animate={{ x: [0, 50, -50, 0], y: [0, -50, 50, 0], scale: [1, 1.2, 1] }} transition={{ duration: 15, repeat: Infinity, ease: "easeInOut" }} className="absolute -top-[20%] -left-[10%] w-[50vw] h-[50vw] rounded-full bg-indigo-500/20 dark:bg-indigo-900/40 blur-[120px] mix-blend-multiply dark:mix-blend-screen" />
+        <motion.div animate={{ x: [0, -60, 40, 0], y: [0, 60, -40, 0], scale: [1, 1.1, 1] }} transition={{ duration: 20, repeat: Infinity, ease: "easeInOut", delay: 1 }} className="absolute top-[40%] -right-[10%] w-[40vw] h-[40vw] rounded-full bg-purple-400/20 dark:bg-purple-900/30 blur-[100px] mix-blend-multiply dark:mix-blend-screen" />
+        <motion.div animate={{ backgroundColor: auraGlow.replace('0.2', '0.4') }} transition={{ duration: 1.5, ease: "easeInOut" }} className="absolute bottom-[-10%] left-[20%] w-[60vw] h-[40vw] rounded-full blur-[140px] opacity-60 dark:opacity-50 mix-blend-multiply dark:mix-blend-screen" />
+      </div>
+
+    <AnimatePresence mode="wait">
+      {isSearching ? (
+        <motion.div
+          key="searching"
+          initial={{ opacity: 0, scale: 0.95, filter: "blur(10px)" }}
+          animate={{ opacity: 1, scale: 1, filter: "blur(0px)" }}
+          exit={{ opacity: 0, scale: 1.05, filter: "blur(10px)" }}
+          transition={{ duration: 0.8, ease: "easeInOut" }}
+          className="min-h-screen flex flex-col items-center justify-center p-6 relative z-10 w-full"
+        >
+          <motion.div 
+          animate={{ scale: [1, 1.05, 1], opacity: [0.8, 1, 0.8] }}
+          transition={{ repeat: Infinity, duration: 3, ease: "easeInOut" }}
+          className="relative z-10"
+        >
+          <div className="bg-white/60 dark:bg-white/[0.03] backdrop-blur-3xl border border-slate-200 dark:border-white/10 p-12 rounded-full relative group shadow-[0_0_50px_rgba(99,102,241,0.2)]">
+            <div className={`absolute inset-0 border-2 rounded-full ${searchTimedOut ? 'border-slate-500/30' : 'border-indigo-500/30 animate-[spin_4s_linear_infinite] border-t-indigo-500 dark:border-t-indigo-400'}`}></div>
+            <div className={`absolute inset-2 border rounded-full ${searchTimedOut ? 'border-slate-400/20' : 'border-purple-500/20 animate-[spin_3s_linear_infinite_reverse] border-b-purple-500 dark:border-b-purple-400'}`}></div>
+            {searchTimedOut ? (
+              <AlertTriangle className="w-16 h-16 text-slate-500 dark:text-slate-400 relative z-10 opacity-50" />
+            ) : (
+              <Loader2 className="w-16 h-16 text-indigo-500 dark:text-indigo-300 animate-pulse relative z-10 drop-shadow-[0_0_10px_rgba(165,180,252,0.8)]" />
+            )}
+          </div>
+        </motion.div>
+        
+        {searchTimedOut ? (
+          <div className="mt-12 text-center z-10 space-y-4">
+            <h2 className="text-3xl font-bold text-slate-800 dark:text-white drop-shadow-sm">
+              Takes longer than usual...
+            </h2>
+            <p className="text-slate-500 dark:text-slate-400 font-light tracking-wide max-w-md mx-auto">
+              There aren't many active users feeling <span className="text-slate-800 dark:text-white font-medium bg-slate-200 dark:bg-white/10 px-3 py-1 rounded-full border border-slate-300 dark:border-white/10">{mood}</span> right now. Please hold on or try a different emotion.
+            </p>
+          </div>
+        ) : (
+          <div className="mt-12 text-center z-10 space-y-3">
+            <h2 className="text-3xl font-bold bg-gradient-to-r from-indigo-500 via-purple-500 to-indigo-500 dark:from-indigo-300 dark:via-purple-300 dark:to-indigo-300 bg-[length:200%_auto] animate-[gradient_3s_linear_infinite] bg-clip-text text-transparent drop-shadow-sm">
+              Finding your vibe match...
+            </h2>
+            <p className="text-slate-500 dark:text-slate-400 font-light tracking-wide">
+              Searching for someone feeling <span className="text-slate-800 dark:text-white font-medium bg-slate-200 dark:bg-white/10 px-3 py-1 rounded-full border border-slate-300 dark:border-white/10">{mood}</span>
+            </p>
+          </div>
+        )}
+
+        <div className="flex flex-col sm:flex-row gap-4 mt-16 z-10">
+          {searchTimedOut && (
+            <button 
+              onClick={handleRestartSearch}
+              className="text-white dark:text-slate-900 bg-indigo-500 hover:bg-indigo-400 dark:bg-slate-100 dark:hover:bg-white transition-all uppercase text-xs tracking-[0.2em] font-bold px-8 py-3.5 rounded-full shadow-lg"
+            >
+              Restart Search
+            </button>
+          )}
+          <button 
+            onClick={handleLeave}
+            className="text-slate-500 hover:text-slate-900 dark:text-slate-500/50 dark:hover:text-white transition-all uppercase text-xs tracking-[0.2em] font-bold px-6 py-3 rounded-full hover:bg-slate-200 dark:hover:bg-white/5 border border-transparent hover:border-slate-300 dark:hover:border-white/10"
+          >
+            Cancel & Exit
+          </button>
+        </div>
+      </motion.div>
+      ) : (
+      <motion.div 
+         key="chat"
+         initial={{ opacity: 0, y: 50, filter: "blur(10px)" }}
+         animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
+         exit={{ opacity: 0, scale: 0.95, filter: "blur(10px)" }}
+         transition={{ duration: 0.8, ease: "easeInOut" }}
+         className="h-screen w-full flex flex-col relative z-10 max-w-5xl mx-auto shadow-2xl bg-white/60 dark:bg-[#0a0f1d]/30 backdrop-blur-3xl sm:border-x sm:border-slate-200 sm:dark:border-white/5"
+      >
+      {/* Header */}
+      <header className="p-4 bg-white/40 dark:bg-white/[0.02] border-b border-slate-200 dark:border-white/5 z-20 flex justify-between items-center shadow-md">
+        <div className="flex items-center gap-3">
+          <div className="p-2 bg-indigo-500/10 rounded-xl border border-indigo-500/20">
+            <UserIcon className="w-5 h-5 text-indigo-500 dark:text-indigo-400" />
+          </div>
+          <div>
+            <h3 className="font-bold text-sm text-slate-900 dark:text-white">
+              {partner?.username || 'Partner'}
+              {partnerDisconnected && <span className="ml-2 text-[10px] text-red-500 font-normal">(Left)</span>}
+            </h3>
+            <p className="text-[10px] text-indigo-500 dark:text-indigo-400 uppercase tracking-wider font-extrabold flex items-center gap-1">
+              {partnerDisconnected ? (
+                <span className="text-red-500">Disconnected</span>
+              ) : (
+                <>
+                  <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse"></span>
+                  Live Match
+                </>
+              )}
+            </p>
+          </div>
+        </div>
+        <div className="flex items-center gap-1 sm:gap-2">
+          <ThemeToggle className="!p-2 shadow-none border-transparent hover:border-slate-200 dark:hover:border-white/10 dark:bg-white/5 bg-slate-200 hover:bg-slate-300 dark:hover:bg-white/10 scale-90 sm:scale-100" />
+          {!partnerDisconnected && (
+            <>
+              <button 
+                onClick={() => setShowReportModal(true)}
+                className="p-2 hover:bg-red-500/10 dark:hover:bg-red-500/20 rounded-xl text-slate-500 dark:text-slate-400 hover:text-red-500 dark:hover:text-red-300 transition-all border border-transparent hover:border-red-500/20 dark:hover:border-red-500/30"
+                title="Report User"
+              >
+                <Flag className="w-5 h-5" />
+              </button>
+              <button 
+                onClick={handleSkip}
+                className="flex items-center gap-1 sm:gap-2 px-3 py-1.5 sm:px-4 sm:py-2 bg-white/80 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 rounded-xl text-slate-800 dark:text-white text-[10px] sm:text-xs tracking-wider font-bold transition-all border border-slate-200 dark:border-white/10 hover:border-indigo-400/50 shadow-sm"
+              >
+                <SkipForward className="w-3 h-3 sm:w-4 sm:h-4 text-indigo-500 dark:text-indigo-300" />
+                SKIP
+              </button>
+            </>
+          )}
+          <button 
+            onClick={handleLeave}
+            className="p-2 ml-2 hover:bg-slate-200 dark:hover:bg-slate-800/50 rounded-xl text-slate-500 hover:text-slate-900 dark:hover:text-white transition-all font-bold border border-transparent hover:border-slate-300 dark:hover:border-white/10"
+          >
+            <LogOut className="w-5 h-5" />
+          </button>
+        </div>
+      </header>
+
+      {/* Messages */}
+      <div className="flex-1 overflow-y-auto p-4 space-y-6 z-10 scrollbar-thin scrollbar-thumb-slate-300 dark:scrollbar-thumb-white/10 scrollbar-track-transparent">
+        {(partnerDisconnected || partnerSkipped) && (
+          <div className="flex justify-center my-6">
+            <span className="bg-slate-50 dark:bg-white/[0.02] backdrop-blur-xl text-red-500 dark:text-red-400 text-[10px] px-4 py-1.5 rounded-full border border-red-500/20 dark:border-red-500/30 font-bold uppercase tracking-widest shadow-[0_0_15px_rgba(239,68,68,0.1)]">
+              {partnerSkipped ? 'Partner skipped the conversation' : 'Partner has left the conversation'}
+            </span>
+          </div>
+        )}
+        <AnimatePresence initial={false}>
+          {messages.map((msg) => (
+            <motion.div
+              key={msg._id}
+              initial={{ opacity: 0, y: 10, scale: 0.95 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              className={`flex ${msg.senderId === userId ? 'justify-end' : 'justify-start'} group`}
+            >
+              <div className={`max-w-[80%] flex flex-col gap-1 ${msg.senderId === userId ? 'items-end' : 'items-start'}`}>
+                <div className={`flex items-center gap-2 ${msg.senderId === userId ? 'flex-row-reverse' : 'flex-row'}`}>
+                  <div className={`rounded-[1.5rem] overflow-hidden flex flex-col backdrop-blur-md border ${
+                    msg.senderId === userId 
+                      ? 'bg-gradient-to-br from-indigo-500 to-purple-600 border-white/20 text-white rounded-tr-sm shadow-[0_0_20px_rgba(99,102,241,0.3)]' 
+                      : 'bg-white/80 dark:bg-white/[0.05] border-slate-200 dark:border-white/10 text-slate-800 dark:text-slate-100 rounded-tl-sm shadow-sm dark:shadow-[0_0_15px_rgba(255,255,255,0.02)]'
+                  }`}>
+                    {msg.replyTo && (
+                      <div className={`mx-1 mt-1 mb-1 p-2 rounded-xl text-left pointer-events-none shadow-inner ${msg.senderId === userId ? 'bg-black/20 border-l-4 border-white/30' : 'bg-slate-100 dark:bg-black/20 border-l-4 border-indigo-400'}`}>
+                        <div className={`text-[10px] font-black mb-0.5 ${msg.senderId === userId ? 'text-indigo-200' : 'text-indigo-500 dark:text-indigo-300'}`}>
+                          {msg.replyTo.senderId === userId ? 'You' : partner?.username || 'Partner'}
+                        </div>
+                        <div className={`text-xs opacity-90 truncate max-w-[200px] italic ${msg.senderId === userId ? 'text-slate-200' : 'text-slate-500 dark:text-slate-200'}`}>
+                          {msg.replyTo.text}
+                        </div>
+                      </div>
+                    )}
+
+                    {isImageUrl(msg.text.trim()) ? (
+                      <div className="p-1">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img 
+                          src={msg.text.trim()} 
+                          alt="Shared content" 
+                          className="max-h-64 w-auto object-cover rounded-xl shadow-lg"
+                          onError={(e) => {
+                            (e.target as HTMLImageElement).style.display = 'none';
+                            (e.target as HTMLImageElement).parentElement!.innerHTML = `<p class="p-3 text-sm">${msg.text}</p>`;
+                          }}
+                        />
+                      </div>
+                    ) : (
+                      <div className={`px-4 ${msg.replyTo ? 'pb-3 pt-1' : 'py-3'}`}>
+                        <MessageContent text={msg.text} />
+                      </div>
+                    )}
+                  </div>
+                  
+                  <button 
+                    onClick={() => setReplyingTo(msg)}
+                    className="opacity-0 group-hover:opacity-100 p-2 rounded-full hover:bg-white/10 text-slate-400 hover:text-white transition-all scale-90"
+                    title="Reply"
+                  >
+                    <Reply className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          ))}
+        </AnimatePresence>
+        
+        {partnerIsTyping && (
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.8 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="flex justify-start"
+          >
+            <div className="bg-white/80 dark:bg-white/[0.05] border border-slate-200 dark:border-white/10 backdrop-blur-xl text-slate-400 dark:text-slate-300 px-5 py-3 rounded-2xl rounded-tl-sm flex items-center gap-1.5 shadow-sm">
+              <span className="w-1.5 h-1.5 bg-indigo-500 dark:bg-indigo-300 rounded-full animate-bounce [animation-delay:-0.3s]"></span>
+              <span className="w-1.5 h-1.5 bg-indigo-500 dark:bg-indigo-300 rounded-full animate-bounce [animation-delay:-0.15s]"></span>
+              <span className="w-1.5 h-1.5 bg-indigo-500 dark:bg-indigo-300 rounded-full animate-bounce"></span>
+            </div>
+          </motion.div>
+        )}
+        <div ref={messagesEndRef} />
+      </div>
+
+      {/* Input */}
+      <div className="p-4 z-20">
+        <form onSubmit={handleSendMessage} className="max-w-4xl mx-auto">
+          {partnerDisconnected ? (
+            <button 
+              type="button"
+              onClick={handleLeave}
+              className="w-full bg-white/50 dark:bg-white/[0.05] backdrop-blur-xl border border-slate-300 dark:border-white/10 hover:bg-slate-200 dark:hover:bg-white/10 text-slate-700 dark:text-white font-bold py-4 rounded-2xl transition-all shadow-[0_0_40px_rgba(99,102,241,0.05)] dark:shadow-[0_0_40px_rgba(99,102,241,0.15)] tracking-wide"
+            >
+              FIND ANOTHER MATCH
+            </button>
+          ) : (
+            <div className="relative">
+              {/* Replying Banner */}
+              <AnimatePresence>
+                {replyingTo && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 10, height: 0 }}
+                    animate={{ opacity: 1, y: 0, height: 'auto' }}
+                    exit={{ opacity: 0, y: 10, height: 0 }}
+                    className="flex flex-col bg-white/90 dark:bg-slate-800/80 backdrop-blur border border-indigo-200 dark:border-indigo-500/50 rounded-t-[1.5rem] sm:rounded-t-3xl px-4 sm:px-6 py-2 sm:py-3 -mb-2 sm:-mb-4 pt-3 sm:pt-4 pb-5 sm:pb-6 overflow-hidden relative z-30"
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2 text-sm text-indigo-500 dark:text-indigo-300">
+                        <Reply className="w-4 h-4" />
+                        <span className="font-bold tracking-wide">Replying to {replyingTo.senderId === userId ? 'You' : partner?.username || 'Partner'}</span>
+                      </div>
+                      <button type="button" onClick={() => setReplyingTo(null)} className="text-slate-400 hover:text-slate-700 dark:hover:text-white transition-colors bg-slate-100 hover:bg-slate-200 dark:bg-white/5 dark:hover:bg-white/10 p-1 rounded-full">
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+                    <div className="truncate text-slate-500 dark:text-slate-400 text-sm mt-1 italic border-l-2 border-indigo-300 dark:border-indigo-500/50 pl-2">
+                       {replyingTo.text}
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+              
+              {/* Emoji Picker Popup */}
+              <AnimatePresence>
+                {showEmojiPicker && (
+                  <motion.div 
+                    initial={{ opacity: 0, y: 20, scale: 0.95 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: 20, scale: 0.95 }}
+                    transition={{ duration: 0.2 }}
+                    className="absolute bottom-full left-0 mb-4 z-50 shadow-2xl rounded-2xl overflow-hidden border border-slate-200 dark:border-white/10"
+                    ref={emojiPickerRef}
+                  >
+                    <div className="bg-white/90 dark:bg-slate-900/90 backdrop-blur-xl border-white/20">
+                      <EmojiPicker 
+                        onEmojiClick={onEmojiClick}
+                        theme={resolvedTheme === 'light' ? Theme.LIGHT : Theme.DARK}
+                        lazyLoadEmojis={true}
+                        searchDisabled={false}
+                        skinTonesDisabled={true}
+                        height={350}
+                        style={{
+                          backgroundColor: 'transparent',
+                          borderColor: 'transparent',
+                          '--epr-bg-color': 'transparent',
+                        } as React.CSSProperties}
+                      />
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+              
+              <div className="bg-white/90 dark:bg-white/[0.03] backdrop-blur-3xl border border-slate-200 dark:border-white/10 rounded-3xl p-1 sm:p-1.5 flex items-center gap-1 sm:gap-2 shadow-inner dark:shadow-[0_10px_40px_-10px_rgba(0,0,0,0.8)] relative z-40">
+                <button
+                  type="button"
+                  onClick={() => setShowEmojiPicker(!showEmojiPicker)}
+                  className="p-2 sm:p-3 sm:ml-1 bg-transparent hover:bg-slate-100 dark:hover:bg-white/10 rounded-xl sm:rounded-2xl text-slate-500 dark:text-slate-400 hover:text-indigo-500 dark:hover:text-indigo-300 transition-all group"
+                  title="Add Emoji"
+                >
+                  <Smile className="w-4 h-4 sm:w-5 sm:h-5 transition-transform group-hover:scale-110" />
+                </button>
+                <input
+                  type="text"
+                  value={inputText}
+                  onChange={handleInputChange}
+                  disabled={partnerDisconnected}
+                  placeholder="Message securely..."
+                  className="flex-1 bg-transparent border-none px-2 sm:px-3 py-2 sm:py-3 text-xs sm:text-sm text-slate-800 dark:text-white placeholder-slate-400 focus:ring-0 focus:outline-none disabled:opacity-50"
+                  onFocus={() => setShowEmojiPicker(false)}
+                />
+                <button 
+                  type="submit"
+                  disabled={!inputText.trim() || partnerDisconnected}
+                  className="p-2 sm:p-3 sm:mr-1 bg-indigo-500 hover:bg-indigo-400 dark:bg-white/10 dark:hover:bg-white/20 disabled:opacity-30 rounded-xl sm:rounded-2xl text-white dark:text-indigo-300 transition-all border border-indigo-400 dark:border-white/5 disabled:border-transparent group"
+                >
+                  <Send className="w-4 h-4 sm:w-5 sm:h-5 transform group-hover:translate-x-1 group-hover:-translate-y-1 transition-transform" />
+                </button>
+              </div>
+            </div>
+          )}
+        </form>
+      </div>
+
+      {/* Report Modal */}
+      <AnimatePresence>
+        {showReportModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl sm:rounded-3xl p-5 sm:p-6 w-full max-w-md shadow-2xl"
+            >
+              <div className="flex items-center gap-3 mb-4">
+                <div className="p-2 bg-red-500/10 rounded-xl">
+                  <AlertTriangle className="w-6 h-6 text-red-500" />
+                </div>
+                <h3 className="text-xl font-bold text-slate-900 dark:text-white">Report Partner</h3>
+              </div>
+              
+              <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">
+                Please provide a reason for reporting this user. This helps us keep the community safe.
+              </p>
+              
+              <textarea
+                value={reportReason}
+                onChange={(e) => setReportReason(e.target.value)}
+                placeholder="Inappropriate behavior, spam, etc..."
+                className="w-full bg-slate-100 dark:bg-slate-800 border-none rounded-2xl p-4 text-sm text-slate-900 dark:text-white focus:ring-2 focus:ring-indigo-500 mb-6 h-32 resize-none"
+              />
+              
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setShowReportModal(false)}
+                  className="flex-1 py-3 px-4 rounded-2xl bg-slate-200 dark:bg-slate-800 hover:bg-slate-300 dark:hover:bg-slate-700 text-slate-900 dark:text-white font-bold transition-all"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleReport}
+                  disabled={!reportReason.trim() || isReporting}
+                  className="flex-1 py-3 px-4 rounded-2xl bg-red-500 dark:bg-red-600 hover:bg-red-600 dark:hover:bg-red-500 text-white disabled:opacity-50 font-bold transition-all shadow-lg shadow-red-500/20"
+                >
+                  {isReporting ? 'Submitting...' : 'Submit Report'}
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+      </motion.div>
+      )}
+    </AnimatePresence>
+    </div>
+  );
+}
+
+export default function ChatPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen flex flex-col items-center justify-center text-slate-900 dark:text-slate-100 bg-slate-50 dark:bg-[#020617] p-6 relative transition-colors duration-500">
+        <div className="bg-white/60 dark:bg-white/5 backdrop-blur-3xl border border-slate-200 dark:border-white/10 p-8 rounded-full shadow-[0_0_30px_rgba(0,0,0,0.05)] dark:shadow-[0_0_30px_rgba(255,255,255,0.05)]">
+           <Loader2 className="w-8 h-8 text-indigo-500 dark:text-indigo-400 animate-spin" />
+        </div>
+      </div>
+    }>
+      <ChatContent />
+    </Suspense>
+  );
+}

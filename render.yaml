@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: conemo-web
+    env: docker
+    region: ohio
+    plan: free
+
+    envVars:
+      - key: MONGO_URI
+        value: your_mongodb_atlas_connection_string
+
+      - key: JWT_SECRET
+        generateValue: true
+
+      - key: NODE_ENV
+        value: production
+
+      - key: NEXT_PUBLIC_SITE_URL
+        value: https://conemo-web.onrender.com
