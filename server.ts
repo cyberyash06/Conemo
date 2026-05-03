@@ -18,11 +18,23 @@ const handle = app.getRequestHandler();
 
 app.prepare().then(() => {
   const server = express();
-  
+
   // Apply security headers
-  server.use(helmet({
-    contentSecurityPolicy: false, // Turn off CSP as Next.js handles its own or can conflict if not configured perfectly
-  }));
+  server.use(
+    helmet({
+      contentSecurityPolicy: false,
+    })
+  );
+
+  // ✅ IMPORTANT: Health check route (for Render)
+  server.get('/', (req, res) => {
+    res.status(200).send('Server is alive');
+  });
+
+  // ✅ Optional but recommended
+  server.get('/health', (req, res) => {
+    res.status(200).send('OK');
+  });
 
   const httpServer = createServer(server);
 
@@ -35,7 +47,8 @@ app.prepare().then(() => {
     handle(req, res, parsedUrl);
   });
 
-  httpServer.listen(port, () => {
+  // ✅ IMPORTANT: bind to 0.0.0.0
+  httpServer.listen(port, hostname, () => {
     console.log(`> Ready on http://${hostname}:${port}`);
   });
 });
