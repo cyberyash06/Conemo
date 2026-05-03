@@ -1,11 +1,6 @@
 import jwt from 'jsonwebtoken';
 
-const JWT_SECRET = process.env.JWT_SECRET;
-
-if (!JWT_SECRET) {
-  throw new Error('JWT_SECRET is not defined in environment variables');
-}
-
+const JWT_SECRET = process.env.JWT_SECRET || "fallback_secret";
 const adjectives = [
   'Calm', 'Brave', 'Sunny', 'Happy', 'Cool', 'Silent', 'Swift', 'Gentle', 'Wild', 'Smart',
   'Quiet', 'Neon', 'Cosmic', 'Wandering', 'Hidden', 'Misty', 'Crystal', 'Crimson', 'Azure',
