@@ -27,9 +27,7 @@ app.prepare().then(() => {
   );
 
   // ✅ IMPORTANT: Health check route (for Render)
-  server.get('/', (req, res) => {
-    res.status(200).send('Server is alive');
-  });
+  
 
   // ✅ Optional but recommended
   server.get('/health', (req, res) => {
