@@ -1,10 +1,6 @@
 import mongoose from 'mongoose';
 
-const MONGODB_URI = process.env.MONGODB_URI;
-
-if (!MONGODB_URI) {
-  throw new Error('Please define the MONGODB_URI environment variable inside .env');
-}
+const MONGODB_URI = process.env.MONGODB_URI || "mongodb://fallback";
 
 /**
  * Global is used here to maintain a cached connection across hot reloads
@@ -20,6 +16,11 @@ if (!cached) {
 }
 
 async function connectDB() {
+  if (!process.env.MONGODB_URI) {
+    console.warn("⚠️ Skipping DB connection during build");
+    return;
+  }
+  
   if (cached.conn) {
     return cached.conn;
   }
